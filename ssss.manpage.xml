@@ -9,8 +9,8 @@ href="http://masqmail.cx/xmltoman/xmltoman.xsl" ?>
 
 <synopsis>
       <cmd>ssss-split -t <arg>threshold</arg> -n <arg>shares</arg> [-w <arg>token</arg>] 
-         [-s <arg>level</arg>] [-x] [-q] [-Q] [-D] [-v]</cmd>
-      <cmd>ssss-combine -t <arg>threshold</arg> [-x] [-q] [-Q] [-D] [-v]</cmd>
+	      [-s <arg>level</arg>] [-x] [-q] [-Q] [-D] [-E] [-I <arg>iterations<arg>] [-v]</cmd>
+      <cmd>ssss-combine -t <arg>threshold</arg> [-x] [-q] [-Q] [-D] [-E] [-v]</cmd>
 </synopsis>
 
 <description>
@@ -91,6 +91,18 @@ warnings.</p>
       ssss version 0.1.</p>
 </optdesc>
 </option>      
+
+      <option><p><opt>-E</opt></p>
+<optdesc>
+      <p>Encrypt the secret using AES-256 in GCM mode before splitting it. Disables diffusion.</p>
+</optdesc>
+</option>
+
+      <option><p><opt>-I <arg>iterations</arg></opt></p>
+<optdesc>
+      <p>Number of PBKDF2 iterations for derivation of AES key from passphrase. defaults to 100,000.</p>
+</optdesc>
+</option>
 
       <option><p><opt>-v</opt></p>
 <optdesc>
