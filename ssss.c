@@ -96,10 +96,11 @@ void fatal(char *msg)
   exit(1);
 }
 
-void warning(char *msg)
+void warning(opts_t opts, char *msg)
 {
-  //if ((opts & opts_QUIET) == 0)
+  if ((opts & opts_quiet) == 0) {
     fprintf(stderr, "%sWARNING: %s.\n", isatty(2) ? "\a" : "", msg);
+  }
 }
 
 /* field arithmetic routines */
@@ -135,13 +136,13 @@ int field_import(mpz_t x, const char *s, size_t s_len, int hexmode)
 {
   int result = -1;
   if (hexmode) {
-    require_action(s_len <= degree / 4, out, warning("input string too long"));
+    require_action(s_len <= degree / 4, out, warning(opts_none, "input string too long"));
     if (s_len < degree / 4) {
-      warning("input string too short, adding null padding on the left");
+      warning(opts_none, "input string too short, adding null padding on the left");
     }
-    require_action(!mpz_set_str(x, s, 16) && mpz_cmp_ui(x, 0) >= 0, out, warning("invalid syntax"));
+    require_action(!mpz_set_str(x, s, 16) && mpz_cmp_ui(x, 0) >= 0, out, warning(opts_none, "invalid syntax"));
   } else {
-    require_action(s_len <= degree / 8, out, warning("input string too long"));
+    require_action(s_len <= degree / 8, out, warning(opts_none, "input string too long"));
     mpz_import(x, s_len, 1, 1, 0, 0, s);
   }
 
@@ -203,7 +204,7 @@ typedef struct {
 } __attribute__((packed)) enc_params_t;
 
 /* encrypt or decrypt the secret */
-int encrypt_or_decrypt_secret(bool encrypt, const char *buf, size_t buf_len, const char *passphrase, size_t passphrase_len, int pbkdf_iterations, enc_params_t *params, char *result_out)
+int encrypt_or_decrypt_secret(opts_t opts, bool encrypt, const char *buf, size_t buf_len, const char *passphrase, size_t passphrase_len, int pbkdf_iterations, enc_params_t *params, char *result_out)
 {
   int result = -1;
   unsigned char enc_key[32] = {};
@@ -282,9 +283,7 @@ int encrypt_or_decrypt_secret(bool encrypt, const char *buf, size_t buf_len, con
 	fatal("decryption update failed");
       }
       plaintext_len = len;
-      if (1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len)) {
-	fatal("decryption finalization failed -- wrong passcode?");
-      }
+      require_action(1 == EVP_DecryptFinal_ex(ctx, plaintext + len, &len), out, warning(opts, "decryption finalization failed -- wrong passcode?"));
       plaintext_len += len;
       if (plaintext_len != (int)buf_len) {
 	fatal("bug");
@@ -297,13 +296,14 @@ int encrypt_or_decrypt_secret(bool encrypt, const char *buf, size_t buf_len, con
   }
 
   result = 0;
+out:
   if (ctx) {
     EVP_CIPHER_CTX_free(ctx);
   }
   /* clear out sensitive stuff from the stack */
-  memset_s(enc_key, 0, sizeof(enc_key), 0);
-  memset_s(plaintext, 0, sizeof(plaintext), 0);
-  memset_s(ciphertext, 0, sizeof(ciphertext), 0);
+  memset_s(enc_key, sizeof(enc_key), 0, sizeof(enc_key));
+  memset_s(plaintext, sizeof(plaintext), 0, sizeof(plaintext));
+  memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
   return result;
 }
 
@@ -322,8 +322,8 @@ void _binary_print(printer_f p, void *printer_ctx, void *binary, size_t binary_l
           (*p)(printer_ctx, "%c", printable ? b[i] : '.');
       }
   }
-  if (warn)
-      warning("binary data detected, use -x mode instead");
+  if (warn && p == (printer_f)fprintf)
+      warning(opts_none, "binary data detected, use -x mode instead");
 }
 
 void binary_print(FILE* stream, void *binary, size_t binary_len, bool hexmode)
@@ -609,8 +609,8 @@ int split(opts_t opts, int threshold, int numbner, int security, const char *tok
 
   cprng_init();
   if (do_encrypt) {
-    require_noerr_action(encrypt_or_decrypt_secret(true, secret, secret_len, passphrase, passphrase_len,
-	  pbkdf_iterations, &params, ciphertext), out, warning("encryption failed"));
+    require_noerr_action(encrypt_or_decrypt_secret(opts, true, secret, secret_len, passphrase, passphrase_len,
+	  pbkdf_iterations, &params, ciphertext), out, warning(opts, "encryption failed"));
     secret = ciphertext;
   }
 
@@ -618,7 +618,7 @@ int split(opts_t opts, int threshold, int numbner, int security, const char *tok
     security = (opts & opts_hex) ? 4 * ((secret_len + 1) & ~1): 8 * secret_len;
   }
 
-  require_action(field_size_valid(security), out, warning("security level invalid (secret too long?)"));
+  require_action(field_size_valid(security), out, warning(opts, "security level invalid (secret too long?)"));
 
   if ((opts & opts_quiet) != 0)
       fprintf(stderr, "Using a %d bit security level.\n", security);
@@ -626,14 +626,13 @@ int split(opts_t opts, int threshold, int numbner, int security, const char *tok
   field_init(security);
 
   mpz_init(coeff[0]);
-  require_noerr_action(field_import(coeff[0], secret, secret_len, (opts & opts_hex) != 0), out, warning("import failed"));
+  require_noerr_action(field_import(coeff[0], secret, secret_len, (opts & opts_hex) != 0), out, warning(opts, "import failed"));
 
   if ((opts & opts_diffusion) != 0) {
     if (degree >= 64)
       encode_mpz(coeff[0], ENCODE);
     else
-      if ((opts & opts_quiet) == 0)
-	warning("security level too small for the diffusion layer");
+      warning(opts, "security level too small for the diffusion layer");
   }
 
   for(i = 1; i < threshold; i++) {
@@ -644,7 +643,7 @@ int split(opts_t opts, int threshold, int numbner, int security, const char *tok
 
   mpz_init(x);
   mpz_init(y);
-  require_action(shares = malloc(numbner * sizeof(char*)), out, warning("malloc"));
+  require_action(shares = malloc(numbner * sizeof(char*)), out, warning(opts, "malloc"));
   for (i = 0; i < numbner; i++) {
     mpz_set_ui(x, i + 1);
     horner(threshold, y, x, (const mpz_t*)coeff);
@@ -689,7 +688,7 @@ void decode_enc_params(const char *encoded_params, enc_params_t *params)
 {
   size_t len = strlen(encoded_params);
   if ((len & 1) == 1) {
-    warning("invalid enc params for share, ignoring");
+    warning(opts_none, "invalid enc params for share, ignoring");
   } else {
     /* decode the first byte, to get the vesion */
     params->version = (HEX2BIN(encoded_params[0])) << 4 | (HEX2BIN(encoded_params[1]));
@@ -732,7 +731,7 @@ int combine(opts_t opts, char shares[][MAXLINELEN], int threshold, const char *p
 
   mpz_init(x);
   for (i = 0; i < threshold; i++) {
-    require_action(a = strchr(shares[i], '-'), out, warning("invalid syntax"));
+    require_action(a = strchr(shares[i], '-'), out, warning(opts, "invalid syntax"));
     *a++ = 0;
     if ((b = strchr(a, '-'))) {
       *b++ = 0;
@@ -754,13 +753,13 @@ int combine(opts_t opts, char shares[][MAXLINELEN], int threshold, const char *p
 
     if (! s) {
       s = 4 * strlen(b);
-      require_action(field_size_valid(s), out, warning("share has illegal length"));
+      require_action(field_size_valid(s), out, warning(opts, "share has illegal length"));
       field_init(s);
     }
     else
-      require_action(s == 4 * strlen(b), out, warning("shares have different security levels"));
+      require_action(s == 4 * strlen(b), out, warning(opts, "shares have different security levels"));
 
-    require_action(j = atoi(a), out, warning("invalid share"));
+    require_action(j = atoi(a), out, warning(opts, "invalid share"));
     mpz_set_ui(x, j);
     mpz_init_set_ui(A[threshold - 1][i], 1);
     for(j = threshold - 2; j >= 0; j--) {
@@ -768,26 +767,26 @@ int combine(opts_t opts, char shares[][MAXLINELEN], int threshold, const char *p
       field_mult(A[j][i], A[j + 1][i], x);
     }
     mpz_init(y[i]);
-    require_noerr_action(field_import(y[i], b, strlen(b), 1), out, warning("field import"));
+    require_noerr_action(field_import(y[i], b, strlen(b), 1), out, warning(opts, "field import"));
     field_mult(x, x, A[0][i]);
     field_add(y[i], y[i], x);
   }
   mpz_clear(x);
-  require_noerr_action(restore_secret(threshold, A, y), out, warning("shares inconsistent. Perhaps a single share was used twice"));
+  require_noerr_action(restore_secret(threshold, A, y), out, warning(opts, "shares inconsistent. Perhaps a single share was used twice"));
 
   if ((opts & opts_diffusion) != 0) {
     if (degree >= 64)
       encode_mpz(y[threshold - 1], DECODE);
     else
       if ((opts & opts_quiet) == 0)
-	warning("security level too small for the diffusion layer");
+	warning(opts, "security level too small for the diffusion layer");
   }
 
   mpz_export(buf, &t, 1, 1, 0, 0, y[threshold - 1]);
 
   if ((opts & opts_encrypt) != 0) {
-    require_noerr_action(encrypt_or_decrypt_secret(false, buf, t, passphrase, passphrase_len, 0, &params, plaintext),
-	out, warning("encryption failed"));
+    require_noerr_action(encrypt_or_decrypt_secret(opts, false, buf, t, passphrase, passphrase_len, 0, &params, plaintext),
+	out, warning(opts, "encryption failed"));
     memcpy(buf, plaintext, t);
   }
   fmt_buf_init(&ctx);
@@ -930,16 +929,16 @@ int main(int argc, char *argv[])
   if (mlockall(MCL_CURRENT | MCL_FUTURE) < 0)
     switch(errno) {
     case ENOMEM:
-      warning("couldn't get memory lock (ENOMEM, try to adjust RLIMIT_MEMLOCK!)");
+      warning(opts_none, "couldn't get memory lock (ENOMEM, try to adjust RLIMIT_MEMLOCK!)");
       break;
     case EPERM:
-      warning("couldn't get memory lock (EPERM, try UID 0!)");
+      warning(opts_none, "couldn't get memory lock (EPERM, try UID 0!)");
       break;
     case ENOSYS:
-      warning("couldn't get memory lock (ENOSYS, kernel doesn't allow page locking)");
+      warning(opts_none, "couldn't get memory lock (ENOSYS, kernel doesn't allow page locking)");
       break;
     default:
-      warning("couldn't get memory lock");
+      warning(opts_none, "couldn't get memory lock");
       break;
     }
 #endif

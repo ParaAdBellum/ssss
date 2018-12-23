@@ -93,7 +93,7 @@ int split_combine_test(opts_t opts, int secret_len, int token_len, int threshold
   int t1, t2;
   char **out_shares = NULL;
   char *result_out = NULL;
-  int number = 50;
+  int number = 10;
 
   memset(secret, 'A', secret_len);
   secret[secret_len] = '\0';
@@ -108,7 +108,7 @@ int split_combine_test(opts_t opts, int secret_len, int token_len, int threshold
 	(opts & opts_encrypt) ? 1 /* low iteration count for speed */ : 0,
 	&out_shares), out);
 
-  for (int i = 0; i < 200; i++) {
+  for (int i = 0; i < 50; i++) {
     /* pick two random and distinct shares */
     do {
       t1 = arc4random() % number;
@@ -119,6 +119,40 @@ int split_combine_test(opts_t opts, int secret_len, int token_len, int threshold
     strlcpy(in_shares[1], out_shares[t2], sizeof(in_shares[1]));
 
     /* make sure they're combinable */
+    if (opts & opts_encrypt) {
+      /* try wrong passcode, assert combining fails */
+      require(combine(opts|opts_quiet, in_shares, threshold,
+	    (opts & opts_encrypt) ? "passworD" : NULL,
+	    (opts & opts_encrypt) ? strlen("passworD") : 0,
+	    &result_out), out);
+
+      strlcpy(in_shares[0], out_shares[t1], sizeof(in_shares[0]));
+      strlcpy(in_shares[1], out_shares[t2], sizeof(in_shares[1]));
+    }
+
+    /* try corrupting a share */
+    size_t len = strlen(in_shares[0]);
+    switch(in_shares[0][len - 1]) {
+      case '0':
+	in_shares[0][len - 1] = '1';
+	break;
+      default:
+	in_shares[0][len - 1] = '0';
+	break;
+    }
+    if (0 == combine(opts|opts_quiet, in_shares, threshold,
+	  (opts & opts_encrypt) ? "password" : NULL,
+	  (opts & opts_encrypt) ? strlen("password") : 0,
+	  &result_out)) {
+      /* assert secret is different */
+      require(strcmp(result_out, secret) != 0, out);
+      free(result_out);
+      result_out = NULL;
+    }
+
+    strlcpy(in_shares[0], out_shares[t1], sizeof(in_shares[0]));
+    strlcpy(in_shares[1], out_shares[t2], sizeof(in_shares[1]));
+
     require_noerr(combine(opts, in_shares, threshold,
 	(opts & opts_encrypt) ? "password" : NULL,
 	(opts & opts_encrypt) ? strlen("password") : 0,
